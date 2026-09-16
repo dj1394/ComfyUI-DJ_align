@@ -389,45 +389,50 @@ const ButtonManager = {
         return selectedNodesObj ? Object.values(selectedNodesObj) : [];
     },
     // 辅助函数：按照 X 或 Y 坐标分组
-    groupNodesByCoordinate(nodes, axis, tolerance = 1000) {
-        if (nodes.length < 4) {
-            // 当选中节点小于 4 个时，不进行分组，直接返回包含所有节点的单个组
-            return [nodes];
-        }
+    // 规则：只有当「对齐轴」上出现明显离群的大间隔时才算断开成新组，其余情况一律视为同一组；
+    //       落单（只有 1 个节点）的组会被并入相邻组——单节点对齐等于没对齐。
+    //       这样无论选中 2 个还是 20 个节点，对齐行为都一致。
+    groupNodesByCoordinate(nodes, axis) {
+        if (!nodes || nodes.length === 0) return [];
+        if (nodes.length === 1) return [nodes];
 
-        const groups = [];
-        const otherAxis = 1 - axis; // 获取另一个轴 (0 -> 1, 1 -> 0)
+        // 排序用副本，不打乱调用方拿到的数组
+        const sorted = [...nodes].sort((a, b) => a.pos[axis] - b.pos[axis]);
 
-        // 1. 基于主轴（axis）对节点进行排序
-        nodes.sort((a, b) => a.pos[axis] - b.pos[axis]);
-
-        // 2. 计算主轴上的间距分布
+        // 相邻节点在主轴上的间隔（负值表示两个节点在该轴上有重叠）
         const gaps = [];
-        for (let i = 1; i < nodes.length; i++) {
-            gaps.push(nodes[i].pos[axis] - (nodes[i - 1].pos[axis] + nodes[i - 1].size[axis]));
+        for (let i = 1; i < sorted.length; i++) {
+            gaps.push(sorted[i].pos[axis] - (sorted[i - 1].pos[axis] + sorted[i - 1].size[axis]));
         }
 
-        // 3. 使用统计方法确定分组的阈值（例如，平均间距加上标准差）
-        const avgGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
-        const stdDevGap = Math.sqrt(gaps.reduce((sum, gap) => sum + Math.pow(gap - avgGap, 2), 0) / gaps.length);
-        const threshold = avgGap + stdDevGap; // 阈值设置为平均间距加上一个标准差
+        // 断点判据：只有当某个间隔大到超过「整片选中区域的跨度一半」时，才算真的分成了两组。
+        // 旧写法拿「平均间距 + 一个标准差」当阈值，间距稍不整齐就会把同一组节点拆开，
+        // 副轴（otherAxis）差异超过 1000 也会误拆——这正是选中 4 个以上节点时
+        // 对齐失效或只对齐一部分的原因。
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const span = (last.pos[axis] + last.size[axis]) - first.pos[axis];
+        const separation = Math.max(span / 2, 200);
 
-        // 4. 根据间距和副轴（otherAxis）上的位置进行分组
-        let currentGroup = [nodes[0]];
-        for (let i = 1; i < nodes.length; i++) {
-            const gap = nodes[i].pos[axis] - (nodes[i - 1].pos[axis] + nodes[i - 1].size[axis]);
-            const otherAxisDiff = Math.abs(nodes[i].pos[otherAxis] - nodes[i - 1].pos[otherAxis]);
-
-            if (gap <= threshold && otherAxisDiff <= tolerance) {
-                // 如果间距小于阈值且副轴上的差异小于容差，则将节点添加到当前组
-                currentGroup.push(nodes[i]);
+        const groups = [[sorted[0]]];
+        for (let i = 1; i < sorted.length; i++) {
+            if (gaps[i - 1] <= separation) {
+                groups[groups.length - 1].push(sorted[i]);
             } else {
-                // 否则，开始一个新的组
-                groups.push(currentGroup);
-                currentGroup = [nodes[i]];
+                groups.push([sorted[i]]);
             }
         }
-        groups.push(currentGroup); // 添加最后一组
+
+        // 合并落单的组，保证每个被选中的节点都真正参与对齐
+        for (let i = groups.length - 1; i >= 0; i--) {
+            if (groups[i].length > 1) continue;
+            if (i > 0) {
+                groups[i - 1] = groups[i - 1].concat(groups[i]);
+            } else if (groups.length > 1) {
+                groups[1] = groups[0].concat(groups[1]);
+            }
+            groups.splice(i, 1);
+        }
 
         return groups;
     },
