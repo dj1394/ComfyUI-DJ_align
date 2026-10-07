@@ -1,4 +1,6 @@
-﻿# 🏔️ ComfyUI-DJ_align
+![预览图](预览图.png)
+
+# 🏔️ ComfyUI-DJ_align
 
 > 版本 `260916-091133` · 作者：大江
 
